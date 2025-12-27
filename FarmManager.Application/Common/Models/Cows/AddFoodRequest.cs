@@ -17,7 +17,7 @@ namespace FarmManager.Application.Common.Models.Cows
         public double AmountInKg { get; set; }
 
         [Range(0.01, 100000.0)]
-        public decimal Cost { get; set; }
+        public decimal PricePerKg { get; set; }
 
         public string? Period { get; set; }
     }

@@ -28,7 +28,7 @@
             public double AmountInLiters { get; set; }
 
             // --- НОВОЕ ПОЛЕ ---
-            public decimal Value { get; set; } // Стоимость этого надоя в деньгах
+            public decimal PricePerLiter { get; set; }
         }
 
         public class FoodConsumptionDto
@@ -36,7 +36,7 @@
             public int Id { get; set; }
             public DateTime Date { get; set; }
             public double AmountInKg { get; set; }
-            public decimal Cost { get; set; }
+            public decimal PricePerKg { get; set; }
         }
     }
 }

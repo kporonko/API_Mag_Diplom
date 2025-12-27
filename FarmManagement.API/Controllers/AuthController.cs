@@ -1,7 +1,9 @@
 using FarmManager.Application.Common.Interfaces;
 using FarmManager.Application.Common.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Authentication;
+using System.Security.Claims;
 
 namespace FarmManagement.API.Controllers
 {

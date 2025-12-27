@@ -11,7 +11,7 @@ namespace FarmManager.Domain.Entities
         public int Id { get; set; }
         public DateTime Date { get; set; }
         public double AmountInKg { get; set; }
-        public decimal Cost { get; set; } // Используем decimal для денег
+        public decimal PricePerKg { get; set; }
 
         // --- Связь ---
         public int CowId { get; set; }

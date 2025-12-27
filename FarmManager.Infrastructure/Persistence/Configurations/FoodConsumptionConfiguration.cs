@@ -16,7 +16,7 @@ namespace FarmManager.Infrastructure.Persistence.Configurations
             builder.HasKey(f => f.Id);
 
             // Настраиваем точность для денег (decimal)
-            builder.Property(f => f.Cost)
+            builder.Property(f => f.PricePerKg)
                 .HasPrecision(18, 2); // Точность для стоимости
 
             builder.Property(f => f.AmountInKg)

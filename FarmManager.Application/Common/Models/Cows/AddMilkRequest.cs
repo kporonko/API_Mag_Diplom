@@ -15,6 +15,7 @@ namespace FarmManager.Application.Common.Models.Cows
 
         [Range(0.1, 100.0)]
         public double AmountInLiters { get; set; }
+        public decimal PricePerLiter { get; set; } 
 
         public string? Period { get; set; }
     }

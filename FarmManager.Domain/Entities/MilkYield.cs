@@ -12,7 +12,9 @@ namespace FarmManager.Domain.Entities
         public DateTime Date { get; set; }
         public double AmountInLiters { get; set; }
 
-        // --- Связь ---
+        // Новое поле: Сколько денег это принесло на момент записи
+        public decimal PricePerLiter { get; set; }
+
         public int CowId { get; set; }
         public virtual Cow Cow { get; set; } = null!;
     }

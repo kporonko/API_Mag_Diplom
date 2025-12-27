@@ -46,80 +46,61 @@ namespace FarmManager.Application.Services
             _config = configuration;
         }
 
-        // --- ИСПРАВЛЕНО: Добавлен userId ---
         public async Task<CowResponse.FoodConsumptionDto> AddFoodConsumptionAsync(int userId, AddFoodRequest request)
         {
-            // Проверяем существование и владение коровой
-            // Теперь используем GetByIdAsync(request.CowId, userId)
-            if (await _cowRepository.GetByIdAsync(request.CowId, userId) == null)
-                throw new KeyNotFoundException("Корова не найдена или не принадлежит пользователю.");
+            await ValidateCowOwnershipAsync(request.CowId, userId);
 
             var food = new FoodConsumption
             {
                 CowId = request.CowId,
                 Date = DateTime.UtcNow,
                 AmountInKg = request.AmountInKg,
-                Cost = request.Cost
+                PricePerKg = request.PricePerKg
             };
 
             await _foodRepository.AddAsync(food);
             await _unitOfWork.SaveChangesAsync();
 
-            // АВТОМАТИЧЕСКИЙ ПЕРЕСЧЕТ СТАТУСА "К ЗАБОЮ" ПОСЛЕ КОРМЛЕНИЯ
-            var period = Enum.TryParse<AnalyticsPeriod>(request.Period, true, out var parsed)
-                ? parsed
-                : AnalyticsPeriod.Month;
-
-            await RunAnalyticsAsync(request.CowId, userId, period);
+            await RefreshAnalyticsAsync(request.CowId, userId, request.Period);
 
             return new CowResponse.FoodConsumptionDto
             {
                 Id = food.Id,
                 Date = food.Date,
                 AmountInKg = food.AmountInKg,
-                Cost = food.Cost
+                PricePerKg = food.PricePerKg
             };
         }
 
-        // --- ИСПРАВЛЕНО: Добавлен userId ---
         public async Task<CowResponse.MilkYieldDto> AddMilkYieldAsync(int userId, AddMilkRequest request)
         {
-            // Проверяем существование и владение коровой
-            // Теперь используем GetByIdAsync(request.CowId, userId)
-            if (await _cowRepository.GetByIdAsync(request.CowId, userId) == null)
-                throw new KeyNotFoundException("Корова не найдена или не принадлежит пользователю.");
+            await ValidateCowOwnershipAsync(request.CowId, userId);
 
             var milk = new MilkYield
             {
                 CowId = request.CowId,
                 Date = DateTime.UtcNow,
-                AmountInLiters = request.AmountInLiters
+                AmountInLiters = request.AmountInLiters,
+                PricePerLiter = request.PricePerLiter
             };
 
             await _milkRepository.AddAsync(milk);
             await _unitOfWork.SaveChangesAsync();
 
-            // АВТОМАТИЧЕСКИЙ ПЕРЕСЧЕТ СТАТУСА "К ЗАБОЮ" ПОСЛЕ НАДОЯ
-            var period = Enum.TryParse<AnalyticsPeriod>(request.Period, true, out var parsed)
-                ? parsed
-                : AnalyticsPeriod.Month;
+            await RefreshAnalyticsAsync(request.CowId, userId, request.Period);
 
-            await RunAnalyticsAsync(request.CowId, userId, period);
             return new CowResponse.MilkYieldDto
             {
                 Id = milk.Id,
                 Date = milk.Date,
-                AmountInLiters = milk.AmountInLiters
+                AmountInLiters = milk.AmountInLiters,
+                PricePerLiter = milk.PricePerLiter
             };
         }
 
-        // --- ИСПРАВЛЕНО: Добавлен userId ---
         public async Task<CowResponse.WeightRecordDto> CalculateWeightAsync(int userId, CalculateWeightRequest request)
         {
-            // Проверяем существование и владение коровой
-            // Теперь используем GetByIdAsync(request.CowId, userId)
-            if (await _cowRepository.GetByIdAsync(request.CowId, userId) == null)
-                throw new KeyNotFoundException("Корова не найдена или не принадлежит пользователю.");
+            await ValidateCowOwnershipAsync(request.CowId, userId);
 
             double weight = await _flaskClient.GetWeightFromPhotoAsync(request.Photo);
             string photoUrl = await _fileStorage.SaveFileAsync(request.Photo, $"cow_weights/cowId_{request.CowId}");
@@ -135,11 +116,7 @@ namespace FarmManager.Application.Services
             await _weightRepository.AddAsync(weightRecord);
             await _unitOfWork.SaveChangesAsync();
 
-            var period = Enum.TryParse<AnalyticsPeriod>(request.Period, true, out var parsed)
-                ? parsed
-                : AnalyticsPeriod.Month;
-
-            await RunAnalyticsAsync(request.CowId, userId, period);
+            await RefreshAnalyticsAsync(request.CowId, userId, request.Period);
 
             return new CowResponse.WeightRecordDto
             {
@@ -150,16 +127,51 @@ namespace FarmManager.Application.Services
             };
         }
 
-        // --- ИСПРАВЛЕНО: Добавлен userId ---
+        // --- ГЛАВНЫЙ МЕТОД АНАЛИТИКИ (Теперь чистый) ---
         public async Task<AnalyticsResponse> RunAnalyticsAsync(int cowId, int userId, AnalyticsPeriod period = AnalyticsPeriod.Month)
         {
-            // Запрашиваем корову с историей и фильтром по владельцу
-            // Теперь используем GetByIdWithHistoryAsync(cowId, userId)
             var cow = await _cowRepository.GetByIdWithHistoryAsync(cowId, userId);
             if (cow == null) throw new KeyNotFoundException("Корова не найдена или не принадлежит пользователю.");
 
-            // 1. Определяем дату начала выборки
-            DateTime? dateFrom = period switch
+            var startDate = GetAnalyticsStartDate(period);
+            var (income, cost) = CalculateFinancials(cow, startDate);
+            var roi = CalculateRoi(income, cost);
+
+            var isFlaggedForSlaughter = CheckSlaughterCriteria(roi, cost);
+            var meatValue = CalculateMeatValue(cow);
+
+            return new AnalyticsResponse
+            {
+                CowId = cowId,
+                IsFlaggedForSlaughter = isFlaggedForSlaughter,
+                MilkToFoodRatio = roi,
+                EstimatedMeatValue = meatValue,
+                TotalMilkIncome = income,
+                TotalUpkeepCost = cost
+            };
+        }
+
+        // --- ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ (PRIVATE) ---
+
+        private async Task ValidateCowOwnershipAsync(int cowId, int userId)
+        {
+            var exists = await _cowRepository.GetByIdAsync(cowId, userId);
+            if (exists == null)
+                throw new KeyNotFoundException("Корова не найдена или не принадлежит пользователю.");
+        }
+
+        private async Task RefreshAnalyticsAsync(int cowId, int userId, string periodString)
+        {
+            var period = Enum.TryParse<AnalyticsPeriod>(periodString, true, out var parsed)
+                ? parsed
+                : AnalyticsPeriod.Month;
+
+            await RunAnalyticsAsync(cowId, userId, period);
+        }
+
+        private DateTime? GetAnalyticsStartDate(AnalyticsPeriod period)
+        {
+            return period switch
             {
                 AnalyticsPeriod.Week => DateTime.UtcNow.AddDays(-7),
                 AnalyticsPeriod.Month => DateTime.UtcNow.AddMonths(-1),
@@ -167,64 +179,41 @@ namespace FarmManager.Application.Services
                 AnalyticsPeriod.AllTime => null,
                 _ => DateTime.UtcNow.AddMonths(-1)
             };
+        }
 
-            // 2. Фильтруем данные
-            var milkHistory = dateFrom.HasValue
-                ? cow.MilkHistory.Where(m => m.Date >= dateFrom.Value)
-                : cow.MilkHistory;
+        private (decimal Income, decimal Cost) CalculateFinancials(Cow cow, DateTime? startDate)
+        {
+            var milkHistory = startDate.HasValue ? cow.MilkHistory.Where(m => m.Date >= startDate.Value) : cow.MilkHistory;
+            var foodHistory = startDate.HasValue ? cow.FoodHistory.Where(f => f.Date >= startDate.Value) : cow.FoodHistory;
 
-            var foodHistory = dateFrom.HasValue
-                ? cow.FoodHistory.Where(f => f.Date >= dateFrom.Value)
-                : cow.FoodHistory;
+            decimal income = milkHistory.Sum(m => (decimal)m.AmountInLiters * m.PricePerLiter);
+            decimal cost = foodHistory.Sum(f => (decimal)f.AmountInKg * f.PricePerKg);
 
-            // 3. Считаем экономику (Доходы и Расходы)
-            double milkPricePerLiter = _config.GetValue<double>("FarmConfig:MilkPricePerLiter");
+            return (income, cost);
+        }
 
-            double totalMilkLiters = milkHistory.Sum(m => m.AmountInLiters);
-            decimal totalMilkIncome = (decimal)(totalMilkLiters * milkPricePerLiter);
+        private double CalculateRoi(decimal income, decimal cost)
+        {
+            if (cost > 0) return (double)(income / cost);
+            return income > 0 ? 100.0 : 0;
+        }
 
-            decimal totalFoodCost = foodHistory.Sum(f => f.Cost);
-
-            // 4. ROI (Коэффициент)
-            double ratio = 0;
-            if (totalFoodCost > 0)
-            {
-                ratio = (double)(totalMilkIncome / totalFoodCost);
-            }
-            else if (totalMilkIncome > 0)
-            {
-                ratio = 100.0; // Прибыль без затрат
-            }
-
-            // 5. Обновляем статус в БД
+        private bool CheckSlaughterCriteria(double roi, decimal totalCost)
+        {
             double threshold = _config.GetValue<double>("FarmConfig:MilkToFoodRatioThreshold");
-            bool flagForSlaughter = (ratio < threshold && totalFoodCost > 0);
+            // Если ROI ниже порога и мы тратим деньги на еду -> пора на мясо
+            return roi < threshold && totalCost > 0;
+        }
 
-            // Здесь не нужен cowRepository.Update(cow) и SaveChangesAsync(), 
-            // т.к. этот код дублирует то, что уже есть в CowService.
-            // Однако, в контексте ProductionService нам нужно обновить флаг.
-            // Примечание: В идеале, CowService должен быть единственным, кто обновляет Cow.
-            // Но сохраним текущую логику для минимальных изменений.
-            _cowRepository.Update(cow);
+        private decimal CalculateMeatValue(Cow cow)
+        {
+            var latestWeight = cow.WeightHistory
+                .OrderByDescending(w => w.Date)
+                .FirstOrDefault()?.WeightInKg ?? 0;
 
-            // --- Общие показатели ---
-            double meatPricePerKg = _config.GetValue<double>("FarmConfig:MeatPricePerKg");
-            double latestWeight = cow.WeightHistory.OrderByDescending(w => w.Date).FirstOrDefault()?.WeightInKg ?? 0;
-            decimal estimatedMeatValue = (decimal)(latestWeight * meatPricePerKg);
-
-            // Сохраняем
-            await _unitOfWork.SaveChangesAsync();
-
-            // Возвращаем данные ИМЕННО ЗА ЗАПРОШЕННЫЙ ПЕРИОД
-            return new AnalyticsResponse
-            {
-                CowId = cowId,
-                IsFlaggedForSlaughter = flagForSlaughter,
-                MilkToFoodRatio = ratio,
-                EstimatedMeatValue = estimatedMeatValue,
-                TotalMilkIncome = totalMilkIncome, // Доход за период
-                TotalUpkeepCost = totalFoodCost    // Расход за период
-            };
+            // Здесь предполагается, что User доступен через навигационное свойство
+            var meatPrice = cow.ApplicationUser?.DefaultMeatPrice ?? 0;
+            return (decimal)latestWeight * meatPrice;
         }
     }
 }

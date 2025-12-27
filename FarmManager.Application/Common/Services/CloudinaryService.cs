@@ -43,7 +43,6 @@ namespace FarmManager.Application.Common.Services
                 throw new ArgumentException("File not provided");
             }
 
-            // Уникальный PublicId, чтобы не было перезаписей
             var publicId = $"farm_manager/{subfolder}/{Guid.NewGuid()}_{Path.GetFileNameWithoutExtension(file.FileName)}";
 
             await using var stream = file.OpenReadStream();
@@ -53,8 +52,6 @@ namespace FarmManager.Application.Common.Services
                 File = new FileDescription(file.FileName, stream),
                 PublicId = publicId,
                 Folder = $"farm_manager/{subfolder}"
-                // Мы не указываем трансформации при загрузке,
-                // чтобы сохранить оригинал. Мы их применим при *показе*.
             };
 
             var uploadResult = await _cloudinary.UploadAsync(uploadParams);

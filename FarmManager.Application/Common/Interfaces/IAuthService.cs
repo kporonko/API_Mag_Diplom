@@ -12,5 +12,7 @@ namespace FarmManager.Application.Common.Interfaces
         // Либо вернет AuthResponse, либо список ошибок (e.g., "User already exists")
         Task<AuthResponse> RegisterAsync(RegisterRequest request);
         Task<AuthResponse> LoginAsync(LoginRequest request);
+        Task<UserProfileDto> GetUserProfileAsync(int userId);
+        Task<UserProfileDto> UpdateUserProfileAsync(int userId, UpdateProfileRequest request);
     }
 }

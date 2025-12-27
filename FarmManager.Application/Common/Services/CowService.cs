@@ -19,7 +19,6 @@ namespace FarmManager.Application.Services
             _config = config;
         }
 
-        // --- ИЗМЕНЕНО: Принимаем userId и сохраняем его ---
         public async Task<CowResponse> CreateCowAsync(int userId, CreateCowRequest request)
         {
             var cow = new Cow
@@ -27,14 +26,13 @@ namespace FarmManager.Application.Services
                 Name = request.Name,
                 Breed = request.Breed,
                 BirthDate = request.BirthDate,
-                ApplicationUserId = userId // <--- СОХРАНЕНИЕ ID
+                ApplicationUserId = userId
             };
             await _cowRepository.AddAsync(cow);
             await _unitOfWork.SaveChangesAsync();
             return MapToCowResponse(cow);
         }
 
-        // --- ИЗМЕНЕНО: Принимаем userId и проверяем его ---
         public async Task DeleteCowAsync(int id, int userId)
         {
             var cow = await _cowRepository.GetByIdAsync(id, userId);
@@ -43,10 +41,9 @@ namespace FarmManager.Application.Services
             await _unitOfWork.SaveChangesAsync();
         }
 
-        // --- ИЗМЕНЕНО: Принимаем userId и передаем в репозиторий ---
         public async Task<IEnumerable<CowResponse>> GetAllCowsAsync(int userId, AnalyticsPeriod period = AnalyticsPeriod.AllTime)
         {
-            var cows = await _cowRepository.GetAllAsync(userId); // <--- ПЕРЕДАЕМ ID
+            var cows = await _cowRepository.GetAllAsync(userId);
 
             DateTime? dateFrom = period switch
             {
@@ -60,10 +57,9 @@ namespace FarmManager.Application.Services
             return cows.Select(c => MapToCowResponse(c, dateFrom));
         }
 
-        // --- ИЗМЕНЕНО: Принимаем userId и передаем в репозиторий ---
         public async Task<CowResponse?> GetCowByIdAsync(int id, int userId, AnalyticsPeriod period = AnalyticsPeriod.AllTime)
         {
-            var cow = await _cowRepository.GetByIdWithHistoryAsync(id, userId); // <--- ПЕРЕДАЕМ ID
+            var cow = await _cowRepository.GetByIdWithHistoryAsync(id, userId);
             if (cow == null) return null;
 
             DateTime? dateFrom = period switch
@@ -78,7 +74,6 @@ namespace FarmManager.Application.Services
             return MapToCowResponse(cow, dateFrom);
         }
 
-        // --- ИЗМЕНЕНО: Принимаем userId и проверяем его ---
         public async Task UpdateCowAsync(int id, int userId, UpdateCowRequest request)
         {
             var cow = await _cowRepository.GetByIdAsync(id, userId);
@@ -92,9 +87,10 @@ namespace FarmManager.Application.Services
             await _unitOfWork.SaveChangesAsync();
         }
 
+        // --- ГЛАВНЫЕ ИСПРАВЛЕНИЯ ЗДЕСЬ ---
         private CowResponse MapToCowResponse(Cow cow, DateTime? filterDateFrom = null)
         {
-            decimal milkPrice = _config.GetValue<decimal>("FarmConfig:MilkPricePerLiter");
+            // Убираем milkPrice из конфига, он больше не нужен для расчетов истории
             double threshold = _config.GetValue<double>("FarmConfig:MilkToFoodRatioThreshold");
 
             var milks = cow.MilkHistory.AsEnumerable();
@@ -106,10 +102,14 @@ namespace FarmManager.Application.Services
                 foods = foods.Where(f => f.Date >= filterDateFrom.Value);
             }
 
-            double totalMilkLiters = milks.Sum(m => m.AmountInLiters);
-            decimal totalMilkIncome = (decimal)totalMilkLiters * milkPrice;
-            decimal totalFoodCost = foods.Sum(f => f.Cost);
+            // 1. Считаем ИСТОРИЧЕСКИЙ доход (Литры * ЦенаВТотДень)
+            decimal totalMilkIncome = milks.Sum(m => (decimal)m.AmountInLiters * m.PricePerLiter);
 
+            // 2. Считаем ИСТОРИЧЕСКИЙ расход (Кг * ЦенаВТотДень)
+            // .Cost больше нет, используем PricePerKg * Amount
+            decimal totalFoodCost = foods.Sum(f => (decimal)f.AmountInKg * f.PricePerKg);
+
+            // ROI
             double ratio = 0;
             if (totalFoodCost > 0) ratio = (double)(totalMilkIncome / totalFoodCost);
             else if (totalMilkIncome > 0) ratio = 100.0;
@@ -141,12 +141,13 @@ namespace FarmManager.Application.Services
                     PhotoUrl = w.PhotoUrl
                 }).OrderByDescending(w => w.Date),
 
+                // Маппинг списков тоже меняем под новые поля
                 MilkHistory = milks.Select(m => new CowResponse.MilkYieldDto
                 {
                     Id = m.Id,
                     Date = m.Date,
                     AmountInLiters = m.AmountInLiters,
-                    Value = (decimal)m.AmountInLiters * milkPrice
+                    PricePerLiter = m.PricePerLiter // Возвращаем цену, фронт сам посчитает итог
                 }).OrderByDescending(m => m.Date),
 
                 FoodHistory = foods.Select(f => new CowResponse.FoodConsumptionDto
@@ -154,7 +155,7 @@ namespace FarmManager.Application.Services
                     Id = f.Id,
                     Date = f.Date,
                     AmountInKg = f.AmountInKg,
-                    Cost = f.Cost
+                    PricePerKg = f.PricePerKg // Возвращаем цену, фронт сам посчитает итог
                 }).OrderByDescending(f => f.Date)
             };
         }

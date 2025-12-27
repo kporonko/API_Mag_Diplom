@@ -42,12 +42,13 @@ namespace FarmManager.Infrastructure.Persistence.Repositories
 
         public async Task<Cow?> GetByIdWithHistoryAsync(int id, int userId)
         {
-            // Находим корову с историей, фильтруя по ID пользователя
             return await _context.Cows
-                .Where(c => c.ApplicationUserId == userId && c.Id == id) // <--- Фильтр по ID пользователя и коровы
+                .AsNoTracking() // Опционально: для аналитики полезно (быстрее), если не собираешься менять саму сущность User
+                .Where(c => c.ApplicationUserId == userId && c.Id == id)
                 .Include(c => c.WeightHistory)
                 .Include(c => c.MilkHistory)
                 .Include(c => c.FoodHistory)
+                .Include(c => c.ApplicationUser) // <--- ВОТ ТУТ МЫ ПОДГРУЖАЕМ ЮЗЕРА
                 .FirstOrDefaultAsync();
         }
 

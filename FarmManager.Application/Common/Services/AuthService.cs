@@ -27,6 +27,56 @@ namespace FarmManager.Application.Common.Services
             _jwtTokenGenerator = jwtTokenGenerator;
         }
 
+        public async Task<UserProfileDto> GetUserProfileAsync(int userId)
+        {
+            var user = await _userRepository.GetByIdAsync(userId);
+
+            if (user == null)
+                throw new KeyNotFoundException("User not found");
+
+            return new UserProfileDto
+            {
+                Id = user.Id,
+                FullName = user.FullName,
+                Language = user.Language,
+                DefaultMilkPrice = user.DefaultMilkPrice,
+                DefaultFoodPrice = user.DefaultFoodPrice,
+                DefaultMeatPrice = user.DefaultMeatPrice
+            };
+        }
+
+        public async Task<UserProfileDto> UpdateUserProfileAsync(int userId, UpdateProfileRequest request)
+        {
+            // 1. Получаем пользователя из БД (EF Core отслеживает изменения этого объекта)
+            var user = await _userRepository.GetByIdAsync(userId);
+
+            if (user == null)
+                throw new KeyNotFoundException("User not found");
+
+            // 2. Обновляем поля
+            user.FullName = request.FullName;
+            user.DefaultMilkPrice = request.DefaultMilkPrice;
+            user.DefaultFoodPrice = request.DefaultFoodPrice;
+            user.DefaultMeatPrice = request.DefaultMeatPrice;
+            user.Language = request.Language;
+
+            // 3. Сохраняем изменения
+            // (В EF Core вызывать Update не обязательно, если объект получен из контекста, 
+            // но SaveChanges нужен обязательно)
+            await _unitOfWork.SaveChangesAsync();
+
+            // 4. Возвращаем обновленные данные
+            return new UserProfileDto
+            {
+                Id = user.Id,
+                FullName = user.FullName,
+                Language = user.Language,
+                DefaultMilkPrice = user.DefaultMilkPrice,
+                DefaultFoodPrice = user.DefaultFoodPrice,
+                DefaultMeatPrice = user.DefaultMeatPrice
+            };
+        }
+
         public async Task<AuthResponse> LoginAsync(LoginRequest request)
         {
             // 1. Найти юзера
@@ -59,23 +109,18 @@ namespace FarmManager.Application.Common.Services
                 throw new InvalidOperationException("Пользователь с таким именем уже существует.");
             }
 
-            // 2. Создать юзера
             var user = new ApplicationUser
             {
                 Username = request.Username,
                 FullName = request.FullName,
-                // 3. ЗАХЕШИРОВАТЬ ПАРОЛЬ
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password)
             };
 
-            // 4. Сохранить в БД
             await _userRepository.AddAsync(user);
-            await _unitOfWork.SaveChangesAsync(); // <-- Коммитим транзакцию
+            await _unitOfWork.SaveChangesAsync();
 
-            // 5. Сгенерировать токен
             var token = _jwtTokenGenerator.GenerateToken(user);
 
-            // 6. Вернуть ответ
             return new AuthResponse
             {
                 Id = user.Id,
